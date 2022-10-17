@@ -1,0 +1,104 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# ** NOTE: you should only have to change the file information in lines 41, 43, 46, 48, 51, 53 in the entire script. It is important to follow the formatting guidelines in this chunk, if input data is not correctly formatted this will not work. Everything else should run as is unless you want to change any of the search parameters in the chunk from lines 78-96, some anticipated adjustments are discussed in each line. **
+
+```{r}
+## R STUDIO SET UP ##
+
+# install Bioconductor package manager (if not already installed)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.14")
+```
+
+```{r}
+# define required package list
+packages <- c("xlsx", "grDevices", "zoo", "dplyr")
+```
+
+```{r}
+# install packages if not already installed
+BiocManager::install(c(packages))
+
+# respond to "Update all/some/none? [a/s/n]:" popup with "n"
+```
+
+```{r}
+# load packages every time you relaunch R/R studio
+lapply(packages, library, character.only = TRUE)
+```
+
+```{r}
+## DEFINE FILEPATHS TO THEORETICAL AND EXPERIMENTAL PEAK LISTS AS WELL AS OUTPUT ##
+ 
+# define the filepath to an Excel file containing a fragment list obtained from the UCSC protein prospector MS-Product tool for your protein/PTM combination of interest (https://prospector.ucsf.edu/prospector/cgi-bin/msform.cgi?form=msproduct)
+# you want to use the expanded "Theoretical Peak Table" from the bottom of the output screen to generate the Excel file
+# make sure that you only have 3 data columns, you will likely need to move things around from how they originally copy over
+# additionally, make sure to name your data columns. The exact names aren't important as they will be changed later, but something like m/z, ID, and composition are relevant. The columns must also be in this order, which is how it is originally output from Protein Prospector
+theor_FP <- "/Users/smd6459/local_data/MALDI/H3(1-20)_MS2_test.xlsx"
+# report the sheet name, even if it is just the default name Sheet1
+theor_sheet <- "Theor_K14+K18Ace"
+
+# define the filepath to an Excel file containing the MS2 fragmentation data collected from your protein/PTM sample, this should have 6 columns ordered m/z, S/N, Quality. Fac., Res., Intens., Area. Again the names are not important as they will be changed later
+exp_FP <- "/Users/smd6459/local_data/MALDI/H3(1-20)_MS2_test.xlsx"
+# report the sheet name, even if it is just the default name Sheet1
+exp_sheet <- "Exp_2Ace"
+
+# define the filepath to an Excel file where you want the assigned peak list to go
+result_FP <- "/Users/smd6459/local_data/MALDI/H3(1-20)_MS2_test.xlsx"
+# define the sheet name where you want your output data stored, this sheet should not already exist or it will throw an error
+result_sheet <- "K14+K18Ace_assignment"
+```
+
+```{r}
+## IMPORT PEAK LISTS FROM EXCEL AND WRANGLE ##
+
+# read in peak lists
+theor_fragments <- read.xlsx(theor_FP, sheetName = theor_sheet)
+exp_fragments <- read.xlsx(exp_FP, sheetName = exp_sheet)
+
+# rename data columns
+colnames(theor_fragments) <- c("m.z", "ID", "Composition")
+colnames(exp_fragments) <- c("m.z", "S.N", "Quality", "Res", "Intensity", "Area")
+# create ID column in exp_fragments
+exp_fragments[ , "ID"] <- NA
+
+# change ID column types from factor to character
+theor_fragments$ID <- as.character(theor_fragments$ID)
+exp_fragments$ID <- as.character(exp_fragments$ID)
+
+# remove redundant peak(s) if necessary
+exp_fragments <- distinct(exp_fragments, m.z, .keep_all = TRUE)
+theor_fragments <- distinct(theor_fragments, m.z, .keep_all = TRUE)
+```
+
+```{r}
+## MATCH EXPERIMENTAL PEAKS TO THEORETICAL PEAKS AND LABEL WITH ION ID ##
+
+# for each theoretical fragment m.z:
+for (peak in theor_fragments$m.z) {
+# generate a list of experimental m.z that match the theoretical peak within a 2 m.z range and with a quality score greater than 100. This is one of the parameter sets you can change. If you want to change the search range, change -2, 2 to a wider or narrower interval, and if you want to change the quality cutoff change 100 to a more or less discriminating threshold
+matches <- which(findInterval(exp_fragments$m.z, c(-2, 2)+peak)==1 & exp_fragments$Quality > 100)
+# choose the match with the largest intensity as the best match. If you want to rewrite this to depend on a different variable, change the column number (5) which corresponds to the intensity column as the column number corresponding to your variable or choice
+if (length(matches)>0) {
+  bestmatch <- max(exp_fragments[matches,5])
+# find the best match index in the experimental data. Don't change this
+  bestmatchindex <- which(findInterval(exp_fragments$m.z, c(-2, 2)+peak)==1 & exp_fragments$Intensity == bestmatch)
+# find the corresponding index in the theoretical data. Don't change this
+  peakindex <- which(theor_fragments$m.z == peak)
+# replace the empty experimental ID with the ID from the theoretical peak list. Don't change this
+  exp_fragments[bestmatchindex,7] <- theor_fragments[peakindex,2]
+  }
+}
+```
+
+```{r}
+## OUTPUT RESULTS TO NEW EXCEL LOCATION ##
+
+# write assignments back to an Excel file, when you reopen the file they will be there in a new sheet
+write.xlsx(exp_fragments, result_FP, sheetName = result_sheet, 
+  col.names = TRUE, row.names = TRUE, append = TRUE)
+```
